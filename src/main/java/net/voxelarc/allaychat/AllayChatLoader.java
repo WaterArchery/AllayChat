@@ -12,7 +12,7 @@ public class AllayChatLoader implements PluginLoader {
     @Override
     public void classloader(PluginClasspathBuilder classpathBuilder) {
         MavenLibraryResolver resolver = new MavenLibraryResolver();
-        resolver.addRepository(new RemoteRepository.Builder("central", "default", "https://maven-central.storage-download.googleapis.com/maven2").build());
+        resolver.addRepository(new RemoteRepository.Builder("central", "default", MavenLibraryResolver.MAVEN_CENTRAL_DEFAULT_MIRROR).build());
         resolver.addDependency(new Dependency(new DefaultArtifact("io.lettuce:lettuce-core:6.8.1.RELEASE"), null));
         resolver.addDependency(new Dependency(new DefaultArtifact("org.latencyutils:LatencyUtils:2.0.3"), null));
         resolver.addDependency(new Dependency(new DefaultArtifact("org.hdrhistogram:HdrHistogram:2.2.2"), null));
