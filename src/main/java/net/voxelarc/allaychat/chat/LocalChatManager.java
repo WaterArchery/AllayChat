@@ -28,6 +28,7 @@ import net.voxelarc.allaychat.api.filter.ChatFilter;
 import net.voxelarc.allaychat.api.inventory.impl.AllayInventory;
 import net.voxelarc.allaychat.api.user.ChatUser;
 import net.voxelarc.allaychat.api.util.ChatUtils;
+import net.voxelarc.allaychat.filter.CooldownFilter;
 import org.bukkit.Bukkit;
 import org.bukkit.Tag;
 import org.bukkit.block.ShulkerBox;
@@ -75,8 +76,17 @@ public class LocalChatManager implements ChatManager {
                 String action = clickSection.getString("action");
                 String command = clickSection.getString("command");
 
-                ClickEvent.Action clickAction = ClickEvent.Action.valueOf(action.toUpperCase());
-                click = new ChatFormat.Click(clickAction, command);
+                // Action names are indexed in lower case, configs use the legacy upper case enum names
+                ClickEvent.Action<?> clickAction = ClickEvent.Action.NAMES.value(action.toLowerCase(Locale.ROOT));
+                if (clickAction == null) {
+                    plugin.getLogger().warning("Unknown click action '" + action + "' in format '" + group + "', ignoring the click event.");
+                } else if (!clickAction.supports(ClickEvent.Payload.string(command))) {
+                    // Only actions taking a text payload can be built from a command string
+                    plugin.getLogger().warning("Click action '" + action + "' in format '" + group + "' does not accept a command, ignoring the click event.");
+                } else {
+                    //noinspection unchecked
+                    click = new ChatFormat.Click((ClickEvent.Action<ClickEvent.Payload.Text>) clickAction, command);
+                }
             }
 
             groupFormatMap.put(group, new ChatFormat(group, format, hover, click));
@@ -171,7 +181,13 @@ public class LocalChatManager implements ChatManager {
         if (format.click() != null) {
             String command = format.click().command();
             command = PlaceholderAPI.setPlaceholders(player, command);
-            component = component.clickEvent(ClickEvent.clickEvent(format.click().action(), command));
+
+            try {
+                component = component.clickEvent(ClickEvent.clickEvent(format.click().action(), ClickEvent.Payload.string(command)));
+            } catch (IllegalArgumentException exception) {
+                plugin.getLogger().warning("Invalid '" + format.click().action().name() + "' click value '" + command
+                        + "' in format '" + format.group() + "', ignoring the click event.");
+            }
         }
 
         return component;
@@ -199,6 +215,11 @@ public class LocalChatManager implements ChatManager {
         for (ChatFilter filter : plugin.getFilters()) {
             boolean cancel = filter.checkMessage(player, message);
             if (cancel) {
+                // Cooldown is a routine rate-limit, not a moderation event — don't alert staff
+                if (filter instanceof CooldownFilter) {
+                    return true;
+                }
+
                 Component component = ChatUtils.format(
                         plugin.getMessagesConfig().getString("messages.message-cancelled-operator"),
                         Placeholder.unparsed("player", player.getName()),
@@ -206,7 +227,7 @@ public class LocalChatManager implements ChatManager {
                         Placeholder.unparsed("flag", filter.getClass().getSimpleName()
                                 .replace("Filter", "").toUpperCase())
                 );
-                plugin.getPlayerManager().broadcast(component, "allaychat.staff");
+                plugin.getChatManager().sendStaffAlert(component);
                 return true;
             }
         }
@@ -368,6 +389,17 @@ public class LocalChatManager implements ChatManager {
     }
 
     @Override
+    public void sendStaffAlert(Component component) {
+        plugin.getComponentLogger().info(component);
+        for (Player staff : Bukkit.getOnlinePlayers()) {
+            if (!staff.hasPermission("allaychat.staff")) continue;
+            ChatUser user = plugin.getUserManager().getUser(staff.getUniqueId());
+            if (user != null && !user.isChatEnabled()) continue;
+            ChatUtils.sendMessage(staff, component);
+        }
+    }
+
+    @Override
     public String getLastMessagedPlayer(String playerName) {
         return this.lastMessageCache.getIfPresent(playerName);
     }
@@ -516,7 +548,7 @@ public class LocalChatManager implements ChatManager {
             UUID uuid = UUID.randomUUID();
             plugin.getChatManager().setInventory(uuid, player.getName(), player.getInventory(), InventoryType.INVENTORY);
 
-            component = component.clickEvent(ClickEvent.clickEvent(ClickEvent.Action.RUN_COMMAND, "/allay inventory %s".formatted(uuid)));
+            component = component.clickEvent(ClickEvent.runCommand("/allay inventory %s".formatted(uuid)));
             component = component.hoverEvent(ChatUtils.format(
                     plugin.getReplacementConfig().getString("inventory.hover"),
                     Placeholder.unparsed("player", player.getName())
@@ -541,7 +573,7 @@ public class LocalChatManager implements ChatManager {
         UUID uuid = UUID.randomUUID();
         plugin.getChatManager().setInventory(uuid, player.getName(), player.getEnderChest(), InventoryType.ENDER_CHEST);
 
-        component = component.clickEvent(ClickEvent.clickEvent(ClickEvent.Action.RUN_COMMAND, "/allay inventory %s".formatted(uuid)));
+        component = component.clickEvent(ClickEvent.runCommand("/allay inventory %s".formatted(uuid)));
         component = component.hoverEvent(ChatUtils.format(
                 plugin.getReplacementConfig().getString("enderchest.hover"),
                 Placeholder.unparsed("player", player.getName())
@@ -571,7 +603,7 @@ public class LocalChatManager implements ChatManager {
 
             Component component = ChatUtils.format(plugin.getReplacementConfig().getString("shulker.text"), Placeholder.unparsed("player", player.getName()));
 
-            component = component.clickEvent(ClickEvent.clickEvent(ClickEvent.Action.RUN_COMMAND, "/allay inventory %s".formatted(uuid)));
+            component = component.clickEvent(ClickEvent.runCommand("/allay inventory %s".formatted(uuid)));
             component = component.hoverEvent(ChatUtils.format(
                     plugin.getReplacementConfig().getString("shulker.hover"),
                     Placeholder.unparsed("player", player.getName())

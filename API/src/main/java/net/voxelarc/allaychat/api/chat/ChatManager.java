@@ -49,6 +49,8 @@ public interface ChatManager {
      */
     void handleStaffChatMessage(Player from, String message);
 
+    void sendStaffAlert(Component component);
+
     String getLastMessagedPlayer(String playerName);
 
     Inventory getInventory(UUID id);
